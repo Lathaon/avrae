@@ -1,9 +1,11 @@
 import enum
-from typing import List, Optional
+from typing import List, Optional, Literal
 
 import disnake
+from pydantic import BaseModel
 
 from . import SettingsBaseModel
+from utils.enums import CritDamageType
 
 DEFAULT_DM_ROLE_NAMES = {"dm", "gm", "dungeon master", "game master"}
 
@@ -14,6 +16,12 @@ class InlineRollingType(enum.IntEnum):
     ENABLED = 2
 
 
+class RandcharRule(BaseModel):
+    type: Literal["gt", "lt"]
+    amount: int
+    value: int
+
+
 class ServerSettings(SettingsBaseModel):
     guild_id: int
     dm_roles: Optional[List[int]] = None
@@ -22,6 +30,17 @@ class ServerSettings(SettingsBaseModel):
     lookup_pm_result: bool = False
     inline_enabled: InlineRollingType = InlineRollingType.DISABLED
     show_campaign_cta: bool = True
+    upenn_nlp_opt_in: bool = False
+    crit_type: CritDamageType = CritDamageType.NORMAL
+
+    randchar_dice: str = "4d6kh3"
+    randchar_sets: int = 1
+    randchar_straight: bool = False
+    randchar_stat_names: Optional[List[str]] = None
+    randchar_num: int = 6
+    randchar_min: int = None
+    randchar_max: int = None
+    randchar_rules: List[RandcharRule] = []
 
     # ==== lifecycle ====
     @classmethod
@@ -44,18 +63,14 @@ class ServerSettings(SettingsBaseModel):
         """Returns a new ServerSettings instance with all default options, updated by legacy lookupsettings options."""
         return cls(
             guild_id=guild_id,
-            lookup_dm_required=d.get('req_dm_monster', True),
-            lookup_pm_dm=d.get('pm_dm', False),
-            lookup_pm_result=d.get('pm_result', False)
+            lookup_dm_required=d.get("req_dm_monster", True),
+            lookup_pm_dm=d.get("pm_dm", False),
+            lookup_pm_result=d.get("pm_result", False),
         )
 
     async def commit(self, mdb):
         """Commits the settings to the database."""
-        await mdb.guild_settings.update_one(
-            {"guild_id": self.guild_id},
-            {"$set": self.dict()},
-            upsert=True
-        )
+        await mdb.guild_settings.update_one({"guild_id": self.guild_id}, {"$set": self.dict()}, upsert=True)
 
     # ==== helpers ====
     def is_dm(self, member: disnake.Member):

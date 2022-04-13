@@ -475,6 +475,24 @@ Draconic Functions
     :return: A random item from the iterable.
     :rtype: Any.
 
+.. function:: randchoices(population, weights=None, cum_weights=None, k=1)
+    
+    Returns a list of random items from ``population`` of ``k`` length with either weighted or cumulatively weighted odds.
+    The ``weights`` [2,1,1] are equal to ``cum_weights`` [2,3,4]. 
+    If no ``weights`` or ``cum_weights`` are input, the items in ``population`` will have equal odds of being chosen.
+    If no ``k`` is input, the output length will be 1.
+    
+    :param population: The itterable to choose random items from.
+    :type population: iterable.
+    :param weights: The odds for each item in the ``population`` iterable.
+    :type weights: list of ints
+    :param cum_weights: The cumulative odds for each item in the ``population`` itterable.
+    :type cum_weights: list of ints
+    :param k: The length of the output.
+    :type k: int
+    :return: A list of random items from the iterable.
+    :rtype: list
+    
 .. autofunction:: aliasing.api.functions.roll
 
 .. autofunction:: aliasing.evaluators.ScriptingEvaluator.set_uvar(name, value)
@@ -490,6 +508,8 @@ Draconic Functions
 .. autofunction:: aliasing.evaluators.ScriptingEvaluator.uvar_exists(name)
 
 .. autofunction:: aliasing.api.functions.vroll(rollStr, multiply=1, add=0)
+
+.. autofunction:: aliasing.api.functions.parse_coins(args: str) -> dict
 
 .. warning::
     The following functions are deprecated and should be avoided:
@@ -1160,6 +1180,34 @@ AliasAction
 
 .. autoclass:: aliasing.api.character.AliasAction()
     :members:
+
+AliasCoinpurse
+^^^^^^^^^^^^^^
+
+.. autoclass:: aliasing.api.character.AliasCoinpurse()
+    :members:
+
+    .. attribute:: str(AliasCoinpurse)
+
+        Returns a string representation of the entire coinpurse. If the character setting for Compact Coins is enabled, this will only return your float gold, otherwise will return all 5 coin types.
+
+        :type: str
+
+    .. attribute:: pp
+        gp
+        ep
+        sp
+        cp
+
+        The value of the given coin type.
+
+        :type: int
+
+    .. attribute:: AliasCoinpurse[cointype]
+
+        Gets the value of the given coin type.
+
+        :type: int
 
 StatBlock Models
 ----------------

@@ -5,66 +5,77 @@ from ..runtime import AutomationTarget
 
 
 class Target(Effect):
-    def __init__(self, target, effects: list, **kwargs):
+    def __init__(self, target, effects: list, sortBy=None, **kwargs):
         super().__init__("target", **kwargs)
         self.target = target
         self.effects = effects
+        self.sort_by = sortBy
 
     @classmethod
     def from_data(cls, data):
-        data['effects'] = Effect.deserialize(data['effects'])
+        data["effects"] = Effect.deserialize(data["effects"])
         return super(Target, cls).from_data(data)
 
     def to_dict(self):
         out = super().to_dict()
         effects = [e.to_dict() for e in self.effects]
         out.update({"type": "target", "target": self.target, "effects": effects})
+        if self.sort_by:
+            out["sortBy"] = self.sort_by
         return out
 
     def run(self, autoctx):
         super().run(autoctx)
         # WEB-038 (.io #121) - this will semantically work correctly, but will make the display really weird
         previous_target = autoctx.target
-        result_pairs = []
 
-        if self.target in ('all', 'each'):
-            for target in autoctx.targets:
-                autoctx.target = AutomationTarget(target)
-                autoctx.metavars['target'] = utils.maybe_alias_statblock(target)  # #1335
-                for iteration_result in self.run_effects(autoctx):
-                    result_pairs.append((target, iteration_result))
-        elif self.target == 'self':
+        if self.sort_by == "hp_asc":
+            targets = sorted(autoctx.targets, key=lambda t: utils.target_hp_or_default(t, float("inf")))
+        elif self.sort_by == "hp_desc":
+            targets = sorted(autoctx.targets, key=lambda t: utils.target_hp_or_default(t, float("-inf")), reverse=True)
+        else:
+            targets = autoctx.targets
+
+        if self.target in ("all", "each"):
+            result_pairs = []
+            for idx, target in enumerate(targets):
+                result_pairs.extend(self.run_target(autoctx, target, idx))
+        elif self.target == "self":
             target = autoctx.caster
-            autoctx.target = AutomationTarget(target)
-            autoctx.metavars['target'] = utils.maybe_alias_statblock(target)  # #1335
-            for iteration_result in self.run_effects(autoctx):
-                result_pairs.append((target, iteration_result))
+            result_pairs = self.run_target(autoctx, target, 0)
         else:
             try:
-                target = autoctx.targets[self.target - 1]
-                autoctx.target = AutomationTarget(target)
-                autoctx.metavars['target'] = utils.maybe_alias_statblock(target)  # #1335
+                target = targets[self.target - 1]
             except IndexError:
                 return TargetResult()
-            for iteration_result in self.run_effects(autoctx):
-                result_pairs.append((target, iteration_result))
+            result_pairs = self.run_target(autoctx, target, 0)
 
         autoctx.target = previous_target
-        autoctx.metavars['target'] = utils.maybe_alias_statblock(previous_target)  # #1335
+        autoctx.metavars["target"] = utils.maybe_alias_statblock(previous_target)  # #1335
 
-        targets, results = zip(*result_pairs)  # convenient unzipping :D
-        return TargetResult(targets, results)
+        final_targets, results = zip(*result_pairs)  # convenient unzipping :D
+        return TargetResult(final_targets, results)
+
+    def run_target(self, autoctx, target, target_index):
+        result_pairs = []
+        autoctx.target = AutomationTarget(target)
+        autoctx.metavars["target"] = utils.maybe_alias_statblock(target)  # #1335
+        autoctx.metavars["targetIndex"] = target_index  # #1711
+        autoctx.metavars["targetNumber"] = target_index + 1
+        for iteration_result in self.run_effects(autoctx):
+            result_pairs.append((target, iteration_result))
+        return result_pairs
 
     def run_effects(self, autoctx):
         args = autoctx.args
         args.set_context(autoctx.target.target)
-        rr = min(args.last('rr', 1, int), 25)
+        rr = min(args.last("rr", 1, int), 25)
 
         in_target = autoctx.target.target is not None
         results = []
 
         # #1335
-        autoctx.metavars['targetIteration'] = 1
+        autoctx.metavars["targetIteration"] = 1
 
         # 2 binary attributes: (rr?, target?)
         # each case must end with a push_embed_field()
@@ -77,7 +88,7 @@ class Target(Effect):
                     iter_title = f"Iteration {iteration + 1}"
 
                 # #1335
-                autoctx.metavars['targetIteration'] = iteration + 1
+                autoctx.metavars["targetIteration"] = iteration + 1
 
                 # target, rr
                 if in_target:

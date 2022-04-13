@@ -20,6 +20,7 @@ Target
         type: "target";
         target: "all"|"each"|int|"self";
         effects: Effect[];
+        sortBy?: "hp_asc" | "hp_desc";
     }
 
 A Target effect should only show up as a top-level effect.
@@ -36,10 +37,22 @@ It designates what creatures to affect.
 
     A list of effects that each targeted creature will be subject to.
 
+.. attribute:: sortBy
+
+    *optional* - Whether to sort the target list. If not given, targets are processed in the order the ``-t`` arguments
+    are seen. This does not affect ``self`` targets.
+
+    - ``hp_asc``: Sorts the targets in order of remaining hit points ascending (lowest HP first, None last).
+    - ``hp_desc``: Sorts the targets in order of remaining hit points descending (highest HP first, None last).
+
 **Variables**
 
 - ``target`` (:class:`~aliasing.api.statblock.AliasStatBlock`) The current target.
 - ``targetIteration`` (:class:`int`) If running multiple iterations (i.e. ``-rr``), the current iteration (1-indexed).
+- ``targetIndex`` (:class:`int`) The index of the target in the list of targets processed by this effect
+  (0-indexed - first target = ``0``, second = ``1``, etc.). Self targets and nth-targets (``target: "self"`` and
+  ``target: int``) will always be ``0``.
+- ``targetNumber`` (:class:`int`) Same as ``targetIndex``, but 1-indexed (equivalent to ``targetIndex + 1``).
 
 Attack
 ------
@@ -50,6 +63,7 @@ Attack
         hit: Effect[];
         miss: Effect[];
         attackBonus?: IntExpression;
+        adv?: IntExpression;
     }
 
 An Attack effect makes an attack roll against a targeted creature.
@@ -67,6 +81,11 @@ It must be inside a Target effect.
 
      *optional* - An IntExpression that details what attack bonus to use (defaults to caster's spell attack mod).
 
+.. attribute:: adv
+
+     *optional* - An IntExpression that details whether the attack has inherent advantage or not. ``0`` for flat, ``1``;
+     for Advantage, ``2`` for Elven Accuracy, ``-1`` for Disadvantage (Default is flat).
+
 **Variables**
 
 - ``lastAttackDidHit`` (:class:`bool`) Whether the attack hit.
@@ -74,6 +93,8 @@ It must be inside a Target effect.
 - ``lastAttackRollTotal`` (:class:`int`) The result of the last to-hit roll (0 if no roll was made).
 - ``lastAttackNaturalRoll`` (:class:`int`) The natural roll of the last to-hit roll (e.g. `10` in `1d20 (10) + 5 = 15`;
   0 if no roll was made).
+- ``lastAttackHadAdvantage`` (:class:`int`) The advantage type of the last to-hit roll. ``0`` for flat, ``1`` for;
+  Advantage, ``2`` for Elven Accuracy, ``-1`` for Disadvantage
 
 Save
 ----
