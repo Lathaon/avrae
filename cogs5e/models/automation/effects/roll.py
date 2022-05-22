@@ -1,4 +1,5 @@
 import copy
+from functools import cached_property
 
 import d20
 import draconic
@@ -36,13 +37,12 @@ class Roll(Effect):
         mi = autoctx.args.last("mi", None, int)
 
         # add on combatant damage effects (#224)
-        if autoctx.combatant:
-            effect_d = "+".join(autoctx.combatant.active_effects("d"))
-            if effect_d:
-                if d:
-                    d = f"{d}+{effect_d}"
-                else:
-                    d = effect_d
+        effect_d = autoctx.caster_active_effects(mapper=lambda effect: effect.effects.damage_bonus, reducer="+".join)
+        if effect_d:
+            if d:
+                d = f"{d}+{effect_d}"
+            else:
+                d = effect_d
 
         dice_ast = copy.copy(d20.parse(autoctx.parse_annostr(self.dice)))
         dice_ast = utils.upcast_scaled_dice(self, autoctx, dice_ast)
@@ -87,16 +87,25 @@ class RollEffectMetaVar:
 
     def __init__(self, simplified_expr: d20.Expression):
         self._expr = simplified_expr
-        self._str = RerollableStringifier().stringify(simplified_expr.roll)
 
+    # cached props
+    @cached_property
+    def _str(self):
+        return RerollableStringifier().stringify(self._expr.roll)
+
+    @cached_property
+    def _total(self):
+        return self._expr.total
+
+    # magic methods
     def __str__(self):
         return self._str
 
     def __int__(self):
-        return int(self._expr)
+        return int(self._total)
 
     def __float__(self):
-        return self._expr.total
+        return float(self._total)
 
     def __eq__(self, other):
-        return self._expr == other
+        return self._total == other

@@ -1,7 +1,9 @@
 import copy
+import textwrap
 import traceback
 import uuid
 from contextlib import suppress
+from typing import List
 
 import disnake
 import draconic
@@ -382,6 +384,7 @@ async def parse_snippets(args, ctx, statblock=None, character=None) -> str:
                 args[index] = argquote(arg)
     finally:
         await evaluator.run_commits()
+        await send_warnings(ctx, evaluator.warnings)
     return " ".join(args)
 
 
@@ -404,51 +407,37 @@ async def parse_draconic(
         evaluator.with_character(character)
     elif statblock is not None:
         evaluator.with_statblock(statblock)
+
     try:
         out = await evaluator.transformed_str_async(
             program, execution_scope=execution_scope, invoking_object=invoking_object
         )
     finally:
         await evaluator.run_commits()
+        await send_warnings(ctx, evaluator.warnings)
     return out
 
 
-# handler
+# ==== errors / warnings ====
 async def handle_alias_exception(ctx, err):
     e = err.original
-    location = f"when parsing expression {err.expression}"
-    locinfo = None
     if isinstance(e, AvraeException):
         return await ctx.channel.send(err)
-    elif isinstance(e, draconic.InvalidExpression):
-        try:
-            location = f"on line {e.node.lineno}, col {e.node.col_offset}"
-            locinfo = (e.node.lineno, e.node.col_offset)
-        except AttributeError:
-            pass
-    elif isinstance(e, draconic.DraconicSyntaxError):
-        location = f"on line {e.lineno}, col {e.offset}"
-        locinfo = (e.lineno, e.offset)
 
-    # make a pointer to the error so it looks nice
-    point_to_error = ""
-    if locinfo:
-        line, col = locinfo
-        the_line = err.expression.split("\n")[line - 1]
-        point_to_error = f"{the_line}\n{' ' * col}^\n"
+    if isinstance(e, draconic.DraconicException):
+        tb = draconic.utils.format_traceback(e)
+    else:
+        tb = traceback.format_exception_only(e)
 
-    if isinstance(e, draconic.AnnotatedException):
+    if isinstance(e, draconic.WrappedException):
         e = e.original
 
-    tb = "".join(traceback.format_exception(type(e), e, e.__traceback__, limit=0, chain=False))
     # send traceback to user
     if not isinstance(e, AliasException) or e.pm_user:
         with suppress(disnake.HTTPException):
             await ctx.author.send(
                 f"```py\n"
-                f"Error {location}:\n"
-                f"{point_to_error}"
-                f"{tb}\n"
+                f"{''.join(tb)}"
                 f"```"
                 f"This is an issue in a user-created command; do *not* report this on the official bug tracker."
             )
@@ -462,6 +451,32 @@ async def handle_alias_exception(ctx, err):
         )
 
 
+async def send_warnings(ctx, warns: List["evaluators.ScriptingWarning"]):
+    if not warns:
+        return
+
+    out = []
+
+    for warn in warns:
+        warn_msg = warn.msg
+        lineinfo = draconic.utils.LineInfo(
+            warn.node.lineno, warn.node.col_offset, warn.node.end_lineno, warn.node.end_col_offset
+        )
+        warn_loc = textwrap.indent(draconic.utils.format_exc_line_pointer(lineinfo, warn.expr), "  ")
+        out.append(f"{warn_msg} ```py\nLine {lineinfo.lineno}, col {lineinfo.col_offset}:\n{warn_loc}\n```")
+
+    # send warnings to user
+    warn_strs = "\n".join(out)
+    with suppress(disnake.HTTPException):
+        await ctx.author.send(
+            f"One or more aliases or snippets raised warnings:\n"
+            f"{warn_strs}"
+            f"This is an issue in a user-created command; please contact the author. Do *not* report this on the "
+            f"official bug tracker."
+        )
+
+
+# ==== entitlements ====
 async def workshop_entitlements_check(ctx, ws_obj):
     """
     :type ws_obj: aliasing.workshop.WorkshopCollectableObject

@@ -54,7 +54,7 @@ An italicized argument below means the argument supports ephemeral arguments - e
 
 **To Hit**
 *adv/dis* - Give advantage or disadvantage to the attack roll(s).
-*ea* - Elven Accuracy, double advantage on the attack roll.
+*eadv* - Elven Accuracy, double advantage on the attack roll.
 *hit* - The attack automatically hits.
 *miss* - The attack automatically misses.
 *-attackroll <value>* - Force the rolled attack to be a fixed number plus modifiers.
@@ -99,6 +99,14 @@ __Damage Types__
 -l <level> - Specifies the level of the spell slot to use.
 nopact - Uses a normal spell slot instead of a Pact Magic slot, if applicable.
 -i - Skips using any resources.
+
+**Checks**
+-ability <ability> - Overrides the check roll's ability (e.g. `-ability arcana`, `-ability sleightOfHand`).
+*-cb <bonus>* - Adds a bonus to ability checks.
+-cdc <dc> - Overrides the DC of the ability check.
+-cdc <+X/-X> - Modifies the DC by a certain amount.
+*cadv/cdis* - Gives the target advantage/disadvantage on the ability check.
+*cpass/cfail* - Target automatically succeeds or fails the ability check if a DC is given.
 
 **Other**
 -h - Hides rolled values.

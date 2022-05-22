@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from d20 import roll
 
@@ -9,18 +9,22 @@ from cogs5e.models.errors import InvalidSaveType
 from cogs5e.models.sheet.statblock import StatBlock
 from utils.argparser import ParsedArguments
 
+if TYPE_CHECKING:
+    from ..evaluators import ScriptingEvaluator
+
 MAX_METADATA_SIZE = 100000
 
 
 # noinspection PyProtectedMember
 class SimpleCombat:
-    def __init__(self, combat, me):
+    def __init__(self, combat: init.Combat, me: Optional[init.Combatant], interpreter: "ScriptingEvaluator" = None):
         self._combat = combat
+        self._interpreter = interpreter
 
-        self.combatants = [SimpleCombatant(c) for c in combat.get_combatants()]
-        self.groups = [SimpleGroup(c) for c in combat.get_groups()]
+        self.combatants = [SimpleCombatant(c, interpreter=interpreter) for c in combat.get_combatants()]
+        self.groups = [SimpleGroup(c, interpreter=interpreter) for c in combat.get_groups()]
         if me:
-            self.me = SimpleCombatant(me, False)
+            self.me = SimpleCombatant(me, False, interpreter=interpreter)
         else:
             self.me = None
         self.round_num = self._combat.round_num
@@ -28,20 +32,20 @@ class SimpleCombat:
         current = self._combat.current_combatant
         if current:
             if current.type == init.CombatantType.GROUP:  # isinstance(current, init.CombatantGroup):
-                self.current = SimpleGroup(current)
+                self.current = SimpleGroup(current, interpreter=interpreter)
             else:
-                self.current = SimpleCombatant(current)
+                self.current = SimpleCombatant(current, interpreter=interpreter)
         else:
             self.current = None
-        self.name = self._combat.options.get("name")
+        self.name = self._combat.options.name
 
     @classmethod
-    def from_ctx(cls, ctx):
+    def from_ctx(cls, ctx, interpreter=None):
         try:
             combat = init.Combat.from_ctx_sync(ctx)
         except init.CombatNotFound:
             return None
-        return cls(combat, None)
+        return cls(combat, None, interpreter=interpreter)
 
     # public methods
     def get_combatant(self, name, strict=None):
@@ -60,9 +64,9 @@ class SimpleCombat:
         combatant = self._combat.get_combatant(name, strict)
         if combatant:
             if combatant.type == init.CombatantType.GROUP:
-                return SimpleGroup(combatant)
+                return SimpleGroup(combatant, interpreter=self._interpreter)
             else:
-                return SimpleCombatant(combatant)
+                return SimpleCombatant(combatant, interpreter=self._interpreter)
         return None
 
     def get_group(self, name, strict=None):
@@ -95,11 +99,11 @@ class SimpleCombat:
         """
         key = str(k)
         value = str(v)
-        previous_metadata_size = sum(len(ke) + len(va) for ke, va in self._combat._metadata.items() if ke != key)
+        previous_metadata_size = sum(len(ke) + len(va) for ke, va in self._combat.metadata.items() if ke != key)
         new_metadata_size = len(key) + len(value)
         if previous_metadata_size + new_metadata_size > MAX_METADATA_SIZE:
             raise ValueError("Combat metadata is too large")
-        self._combat._metadata[key] = value
+        self._combat.metadata[key] = value
 
     def get_metadata(self, k: str, default=None) -> str:
         """
@@ -111,7 +115,7 @@ class SimpleCombat:
         >>> get_metadata("Test")
         '{"Status": ["Mario", 1, 2]}'
         """
-        return self._combat._metadata.get(str(k), default)
+        return self._combat.metadata.get(str(k), default)
 
     def delete_metadata(self, k: str) -> Optional[str]:
         """
@@ -124,7 +128,7 @@ class SimpleCombat:
         >>> delete_metadata("Test")
         '{"Status": ["Mario", 1, 2]}'
         """
-        return self._combat._metadata.pop(str(k), None)
+        return self._combat.metadata.pop(str(k), None)
 
     def set_round(self, round_num: int):
         """
@@ -152,7 +156,7 @@ class SimpleCombat:
         if not me:
             return
         me._character = character  # set combatant character instance
-        self.me = SimpleCombatant(me, False)
+        self.me = SimpleCombatant(me, False, interpreter=self._interpreter)
 
     async def func_commit(self):
         await self._combat.commit()
@@ -170,10 +174,11 @@ class SimpleCombatant(AliasStatBlock):
     Represents a combatant in combat.
     """
 
-    def __init__(self, combatant, hidestats=True):
+    def __init__(self, combatant: init.Combatant, hidestats: bool = True, interpreter: "ScriptingEvaluator" = None):
         super().__init__(combatant)
         self._combatant = combatant
         self._hidden = hidestats and self._combatant.is_private
+        self._interpreter = interpreter
         self.type = "combatant"
 
         self.initmod = int(self._combatant.init_skill)
@@ -187,11 +192,6 @@ class SimpleCombatant(AliasStatBlock):
             self._monster_name = combatant.monster_name
         elif combatant.type == init.CombatantType.PLAYER:
             self._race = combatant.character.race
-        # deprecated drac 2.1
-        self.resists = self.resistances  # use .resistances instead
-        self.level = (
-            self._combatant.spellbook.caster_level
-        )  # use .spellbook.caster_level or .levels.total_level instead
 
     @property
     def id(self):
@@ -218,7 +218,7 @@ class SimpleCombatant(AliasStatBlock):
 
         :rtype: int
         """
-        return int(self._combatant.controller)
+        return self._combatant.controller_id
 
     @property
     def group(self):
@@ -262,7 +262,7 @@ class SimpleCombatant(AliasStatBlock):
         except ValueError:
             raise InvalidSaveType
 
-        sb = self._combatant.active_effects("sb")
+        sb = self._combatant.active_effects(mapper=lambda effect: effect.effects.save_bonus, default=[])
         saveroll = save.d20(base_adv=adv)
         if sb:
             saveroll = f'{saveroll}+{"+".join(sb)}'
@@ -294,9 +294,9 @@ class SimpleCombatant(AliasStatBlock):
 
         class _SimpleAutomationContext(AutomationContext):
             def __init__(self, caster, target, args, combat, crit=False):
-                super(_SimpleAutomationContext, self).__init__(None, None, caster, [target], args, combat)
+                super().__init__(None, None, caster, [target], args, combat)
                 self.in_crit = crit
-                self.target = AutomationTarget(target)
+                self.target = AutomationTarget(self, target)
 
         args = ParsedArguments.from_dict({"critdice": [critdice]})
         if d:
@@ -399,7 +399,7 @@ class SimpleCombatant(AliasStatBlock):
     def add_effect(
         self,
         name: str,
-        args: str,
+        args: str = None,
         duration: int = -1,
         concentration: bool = False,
         parent=None,
@@ -415,7 +415,7 @@ class SimpleCombatant(AliasStatBlock):
         :param bool concentration: Whether the effect requires concentration.
         :param parent: The parent of the effect.
         :type parent: :class:`~aliasing.api.combat.SimpleEffect`
-        :param bool end: Whether the effect ticks on the end of turn.
+        :param bool end: Whether the effect ends on the end of turn.
         :param str desc: A description of the effect.
         """  # noqa: E501
         name, args, duration = str(name), str(args), int(duration)
@@ -425,19 +425,19 @@ class SimpleCombatant(AliasStatBlock):
         existing = self._combatant.get_effect(name, True)
         if existing:
             existing.remove()
-        effectObj = init.Effect.new(
-            self._combatant.combat,
-            self._combatant,
-            duration=duration,
+        effect_obj = init.InitiativeEffect.new(
+            combat=self._combatant.combat,
+            combatant=self._combatant,
             name=name,
             effect_args=args,
+            duration=duration,
+            end_on_turn_end=end,
             concentration=concentration,
-            tick_on_end=end,
             desc=desc,
         )
         if parent:
-            effectObj.set_parent(parent._effect)
-        self._combatant.add_effect(effectObj)
+            effect_obj.set_parent(parent._effect)
+        self._combatant.add_effect(effect_obj)
         self._update_effects()
 
     def remove_effect(self, name: str):
@@ -460,6 +460,19 @@ class SimpleCombatant(AliasStatBlock):
         self.effects = [SimpleEffect(e) for e in self._combatant.get_effects()]
 
     # === deprecated ===
+    # fixme deprecate, remove v4.1
+    @property
+    def resists(self):
+        if self._interpreter is not None:
+            self._interpreter.warn_deprecated("resists", since="v2.5.0", replacement="SimpleCombatant.resistances")
+        return self.resistances
+
+    @property
+    def level(self):
+        if self._interpreter is not None:
+            self._interpreter.warn_deprecated("level", since="v2.5.0", replacement="SimpleCombatant.levels.total_level")
+        return self._combatant.spellbook.caster_level
+
     @property
     def temphp(self):  # deprecated - use temp_hp instead
         """
@@ -470,6 +483,8 @@ class SimpleCombatant(AliasStatBlock):
 
         :rtype: int
         """
+        if self._interpreter is not None:
+            self._interpreter.warn_deprecated("temphp", since="v2.5.0", replacement="SimpleCombatant.temp_hp")
         return self.temp_hp
 
     @property
@@ -482,6 +497,8 @@ class SimpleCombatant(AliasStatBlock):
 
         :rtype: Optional[int]
         """
+        if self._interpreter is not None:
+            self._interpreter.warn_deprecated("maxhp", since="v2.5.0", replacement="SimpleCombatant.max_hp")
         return self.max_hp
 
     def mod_hp(self, mod: int, overheal: bool = False):  # deprecated - use modify_hp instead
@@ -494,6 +511,8 @@ class SimpleCombatant(AliasStatBlock):
         :param int mod: The amount of HP to add.
         :param bool overheal: Whether to allow exceeding max HP.
         """
+        if self._interpreter is not None:
+            self._interpreter.warn_deprecated("mod_hp()", since="v2.5.0", replacement="SimpleCombatant.modify_hp()")
         self.modify_hp(mod, overflow=overheal)
 
     def set_thp(self, thp: int):  # deprecated - use set_temp_hp
@@ -505,6 +524,8 @@ class SimpleCombatant(AliasStatBlock):
 
         :param int thp: The new temp HP.
         """
+        if self._interpreter is not None:
+            self._interpreter.warn_deprecated("set_thp()", since="v2.5.0", replacement="SimpleCombatant.set_temp_hp()")
         self.set_temp_hp(thp)
 
     def wouldhit(self, to_hit: int):
@@ -518,16 +539,19 @@ class SimpleCombatant(AliasStatBlock):
         :return: Whether the total would hit.
         :rtype: bool
         """
+        if self._interpreter is not None:
+            self._interpreter.warn_deprecated("wouldhit()", since="v1.1.5", replacement="to_hit >= SimpleCombatant.ac")
         if self._combatant.ac:
             return to_hit >= self._combatant.ac
         return None
 
 
 class SimpleGroup:
-    def __init__(self, group):
+    def __init__(self, group: init.CombatantGroup, interpreter: "ScriptingEvaluator" = None):
         self._group = group
+        self._interpreter = interpreter
         self.type = "group"
-        self.combatants = [SimpleCombatant(c) for c in self._group.get_combatants()]
+        self.combatants = [SimpleCombatant(c, interpreter=interpreter) for c in self._group.get_combatants()]
         self.init = self._group.init
 
     @property
@@ -588,16 +612,16 @@ class SimpleGroup:
 
 
 class SimpleEffect:
-    def __init__(self, effect):
+    def __init__(self, effect: init.InitiativeEffect):
         self._effect = effect
 
         self.name = self._effect.name
         self.duration = self._effect.duration
         self.remaining = self._effect.remaining
-        self.effect = self._effect.effect
+        self.effect = self._effect.effects.to_dict()
         self.conc = self._effect.concentration
         self.desc = self._effect.desc
-        self.ticks_on_end = self._effect.ticks_on_end
+        self.ticks_on_end = self._effect.end_on_turn_end
         self.combatant_name = self._effect.combatant.name
         self._parent = None
         self._children = None
@@ -633,6 +657,8 @@ class SimpleEffect:
         :param parent: The parent.
         :type parent: :class:`~aliasing.api.combat.SimpleEffect`
         """
+        if not isinstance(parent, SimpleEffect):
+            raise TypeError(f"Parent effect must be a SimpleEffect, not {type(parent).__name__}")
         self._effect.set_parent(parent._effect)
 
     def __str__(self):
